@@ -30,4 +30,8 @@ val reduce : (string * string list) list -> string -> string -> (string * string
  * Returns: a two-tuple containing a hashtable of id (string), title pairs
  *   from the input and the MapReduce output.
  *)
-val map_reduce : string -> string -> string -> string -> (string, string) Hashtable.t * (string * string list) list
+
+(* val map_reduce : string -> string -> string -> string -> (string, string) Hashtable.t * (string * string list) list *)
+(*The above line was replaced with below for testing purpose*)
+val map_reduce : string -> string -> string -> string -> 
+  (string, string) Hashtbl.t * (string * string list) list
