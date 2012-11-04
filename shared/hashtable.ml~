@@ -1,16 +1,13 @@
 type ('a, 'b) t =
-  {
-    items: int ref;
-    table: ((('a * 'b) list) array) ref;
-    hash: 'a -> int
-  }
+    { items: int ref;
+      table: ((('a * 'b) list) array) ref;
+      hash: 'a -> int
+    }
 
 let create capacity hash = 
-  {
-    items = ref 0; 
+  { items = ref 0; 
     table = ref (Array.make capacity []); 
-    hash = hash 
-  }
+    hash = hash }
 
 let rec add table key value =   
   if !(table.items) >= Array.length !(table.table) * 3 / 4 then 
@@ -36,18 +33,17 @@ let find table key =
 let mem table key = 
   try find table key; true
   with Not_found -> false
-    
+
 let remove table key =
   let i = table.hash key mod Array.length !(table.table) in 
   let rec pop acc l = 
     match l with 
     | [] -> (false,List.rev acc)
-    | (k',v)::t -> if k' = key then (true,List.rev acc @ t) 
-      else pop ((k',v)::acc) t in 
+    | (k',v)::t -> if k' = key then (true,List.rev acc @ t) else pop ((k',v)::acc) t in 
   let b,l' = pop [] !(table.table).(i) in 
   !(table.table).(i) <- l';
   if b then table.items := !(table.items) - 1 else ()
-    
+
 let iter f table = 
   let n = Array.length !(table.table) in
   for i = 0 to n - 1 do
