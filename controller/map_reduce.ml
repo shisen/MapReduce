@@ -10,7 +10,7 @@ let map kv_pairs shared_data map_filename : (string * string) list =
   let newwork kv_pair ()= 
     let the_mapper= pop_worker manager in  
     let output_one= ref [] in
-    let value op = match op with
+    let value option = match option with
       |Some l -> l
       |None -> failwith "Error occured in map" in
     output_one:=
@@ -23,14 +23,35 @@ let map kv_pairs shared_data map_filename : (string * string) list =
   List.fold_left (fun () kv_pair->
     Thread_pool.add_work (newwork kv_pair) the_pool) 
     () kv_pairs;
+  Thread.delay 2.0;
   clean_up_workers manager;
   Thread_pool.destroy the_pool;
   !output
 
 let combine kv_pairs : (string * string list) list = 
-  failwith "You have been doomed ever since you lost the ability to love."
-let reduce kvs_pairs shared_data reduce_filename : (string * string list) list =
-  failwith "The only thing necessary for evil to triumph is for good men to do nothing"
+  let arr= ref [||] in 
+  let combine_one () (k,v) = 
+    let found= ref false in 
+    let index= ref 0 in 
+    while (not(!found)) && (!index < Array.length !arr) do
+      if (fst (!arr.(!index)))= k then 
+        (found:= true; 
+         !arr.(!index)<- (fst !arr.(!index), v::(snd !arr.(!index))))
+      else index:= !index +1
+    done;
+    if (not(!found)) then
+      arr:= Array.append !arr [|(k,[v])|] 
+  in
+  List.fold_left combine_one () kv_pairs;
+  Array.to_list !arr
+
+let reduce kvs_pairs shared_data reduce_filename 
+    : (string * string list) list =
+  let manager= initialize_reducers reduce_filename shared_data in
+  let the_pool = Thread_pool.create 200 in
+  let output= ref [] in
+  let write_lock = Mutex.create() in
+  failwith "to be implemented"
 
 let map_reduce (app_name : string) (mapper : string) 
     (reducer : string) (filename : string) =
@@ -49,5 +70,7 @@ let map_reduce (app_name : string) (mapper : string)
   (* The next line is added for debugging purpose*)
   let ()= print_map_results mapped in 
   let combined = combine mapped in
+  (* The next line is added for debugging purpose*)
+  let ()= print_combine_results combined in
   let reduced = reduce combined  "" (app_dir ^ reducer ^ ".ml") in
   (titles, reduced)
