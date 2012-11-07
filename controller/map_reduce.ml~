@@ -7,28 +7,48 @@ let map kv_pairs shared_data map_filename : (string * string) list =
   let the_pool= Thread_pool.create 200 in
   let output = ref [] in
   let write_lock = Mutex.create() in
+  let input = Hashtbl.create 50 in 
+  List.fold_left (fun () (k,v)-> Hashtbl.add input k v) () kv_pairs;
+  let tbllock= Mutex.create() in 
   let newwork kv_pair ()= 
     let the_mapper= pop_worker manager in  
     let output_one= ref [] in
-    let value option = match option with
-      |Some l -> l
-      |None -> failwith "Error occured in map" in
-    output_one:=
-      value (Worker_manager.map the_mapper (fst kv_pair) (snd kv_pair));
-    Mutex.lock write_lock;
-    output:= ((!output)@ (!output_one));
-    Mutex.unlock write_lock;
-    push_worker manager the_mapper
+    let result_one= Worker_manager.map the_mapper (fst kv_pair) (snd kv_pair)
+    in
+    match result_one with
+    |None -> ()
+    |Some l ->
+      output_one:=l;
+      Mutex.lock tbllock;
+      let found= Hashtbl.mem input (fst kv_pair) in
+      Mutex.unlock tbllock;
+      if not(found) then ()
+      else 
+        (Mutex.lock tbllock;
+         Hashtbl.remove input (fst kv_pair);
+         Mutex.unlock tbllock;
+         Mutex.lock write_lock;
+         output:= ((!output)@(!output_one));
+         Mutex.unlock write_lock;
+         push_worker manager the_mapper)
   in 
-  List.fold_left (fun () kv_pair->
-    Thread_pool.add_work (newwork kv_pair) the_pool) 
-    () kv_pairs;
-  Thread.delay 2.0;
+  while 
+    Mutex.lock tbllock;
+    let len= Hashtbl.length input in
+    Mutex.unlock tbllock;
+    len>0 do
+    print_int (Hashtbl.length input);
+    Hashtbl.iter
+      (fun k v -> 
+        Thread_pool.add_work (newwork (k,v)) the_pool) input;
+    Thread.delay 0.1
+  done;
+  print_endline "we are done looping";
   clean_up_workers manager;
   Thread_pool.destroy the_pool;
   !output
 
-let combine kv_pairs : (string * string list) list = 
+let combine kv_pairs : (string * string list) list =
   let arr= ref [||] in 
   let combine_one () (k,v) = 
     let found= ref false in 
@@ -52,6 +72,7 @@ let reduce kvs_pairs shared_data reduce_filename
   let output= ref [] in
   let write_lock = Mutex.create() in
   let combined = Hashtbl.create 50 in 
+  List.fold_left (fun () (k,v)-> Hashtbl.add combined k v) () kvs_pairs;
   let tbllock= Mutex.create() in
   let newwork (pair:string*string list) ()=
     let the_reducer = pop_worker manager in 
@@ -77,9 +98,9 @@ let reduce kvs_pairs shared_data reduce_filename
   while Hashtbl.length combined >0 do
     Hashtbl.iter 
       (fun str str_lst-> 
-        Thread_pool.add_work (newwork (str,str_lst)) the_pool) combined
+        Thread_pool.add_work (newwork (str,str_lst)) the_pool) combined;
+    Thread.delay 0.1
   done;
-  Thread.delay 2.0;
   clean_up_workers manager;
   Thread_pool.destroy the_pool;
   !output
@@ -104,6 +125,4 @@ let map_reduce (app_name : string) (mapper : string)
   (* The next line is added for debugging purpose*)
   let ()= print_combine_results combined in
   let reduced = reduce combined  "" (app_dir ^ reducer ^ ".ml") in
-  (* The next line is added for debugging purpose*)
-  let ()= print_reduce_results reduced in
   (titles, reduced)

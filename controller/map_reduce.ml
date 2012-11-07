@@ -15,6 +15,7 @@ let map kv_pairs shared_data map_filename : (string * string) list =
     let output_one= ref [] in
     let result_one= Worker_manager.map the_mapper (fst kv_pair) (snd kv_pair)
     in
+    push_worker manager the_mapper;
     match result_one with
     |None -> ()
     |Some l ->
@@ -29,14 +30,15 @@ let map kv_pairs shared_data map_filename : (string * string) list =
          Mutex.unlock tbllock;
          Mutex.lock write_lock;
          output:= ((!output)@(!output_one));
-         Mutex.unlock write_lock;
-         push_worker manager the_mapper)
-  in 
-  while 
-    Mutex.lock tbllock;
+         Mutex.unlock write_lock)
+  in
+  print_endline "we start looping";
+  while Hashtbl.length input >0
+ (*   Mutex.lock tbllock;
     let len= Hashtbl.length input in
     Mutex.unlock tbllock;
-    len>0 do
+    len>0 *)
+  do
     print_int (Hashtbl.length input);
     Hashtbl.iter
       (fun k v -> 
@@ -44,8 +46,8 @@ let map kv_pairs shared_data map_filename : (string * string) list =
     Thread.delay 0.1
   done;
   print_endline "we are done looping";
-  clean_up_workers manager;
   Thread_pool.destroy the_pool;
+  clean_up_workers manager;
   !output
 
 let combine kv_pairs : (string * string list) list =
@@ -78,6 +80,7 @@ let reduce kvs_pairs shared_data reduce_filename
     let the_reducer = pop_worker manager in 
     let output_one=ref [] in 
     let result_one=Worker_manager.reduce the_reducer (fst pair) (snd pair) in
+    push_worker manager the_reducer;
     match result_one with
     |None -> ()
     |Some l ->
@@ -92,8 +95,7 @@ let reduce kvs_pairs shared_data reduce_filename
          Mutex.unlock tbllock;
          Mutex.lock write_lock;
          output:= (fst pair, !output_one)::(!output);
-         Mutex.unlock write_lock;
-         push_worker manager the_reducer)
+         Mutex.unlock write_lock)
   in 
   while Hashtbl.length combined >0 do
     Hashtbl.iter 
@@ -101,8 +103,8 @@ let reduce kvs_pairs shared_data reduce_filename
         Thread_pool.add_work (newwork (str,str_lst)) the_pool) combined;
     Thread.delay 0.1
   done;
-  clean_up_workers manager;
   Thread_pool.destroy the_pool;
+  clean_up_workers manager;
   !output
 
 let map_reduce (app_name : string) (mapper : string) 
@@ -120,9 +122,9 @@ let map_reduce (app_name : string) (mapper : string)
   let kv_pairs = List.map add_document docs in
   let mapped = map kv_pairs "" (app_dir ^ mapper ^ ".ml") in
   (* The next line is added for debugging purpose*)
-  let ()= print_map_results mapped in 
+(*  let ()= print_map_results mapped in *)
   let combined = combine mapped in
   (* The next line is added for debugging purpose*)
-  let ()= print_combine_results combined in
+(*  let ()= print_combine_results combined in *)
   let reduced = reduce combined  "" (app_dir ^ reducer ^ ".ml") in
   (titles, reduced)
