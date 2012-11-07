@@ -47,7 +47,42 @@ let combine kv_pairs : (string * string list) list =
 
 let reduce kvs_pairs shared_data reduce_filename 
     : (string * string list) list =
-
+  let manager= initialize_reducers reduce_filename shared_data in
+  let the_pool = Thread_pool.create 200 in
+  let output= ref [] in
+  let write_lock = Mutex.create() in
+  let combined = Hashtbl.create 50 in 
+  let tbllock= Mutex.create() in
+  let newwork (pair:string*string list) ()=
+    let the_reducer = pop_worker manager in 
+    let output_one=ref [] in 
+    let result_one=Worker_manager.reduce the_reducer (fst pair) (snd pair) in
+    match result_one with
+    |None -> ()
+    |Some l ->
+      output_one:= l;
+      Mutex.lock tbllock;
+      let found= Hashtbl.mem combined (fst pair) in
+      Mutex.unlock tbllock;
+      if not(found) then ()
+      else 
+        (Mutex.lock tbllock;
+         Hashtbl.remove combined (fst pair);
+         Mutex.unlock tbllock;
+         Mutex.lock write_lock;
+         output:= (fst pair, !output_one)::(!output);
+         Mutex.unlock write_lock;
+         push_worker manager the_reducer)
+  in 
+  while Hashtbl.length combined >0 do
+    Hashtbl.iter 
+      (fun str str_lst-> 
+        Thread_pool.add_work (newwork (str,str_lst)) the_pool) combined
+  done;
+  Thread.delay 2.0;
+  clean_up_workers manager;
+  Thread_pool.destroy the_pool;
+  !output
 
 let map_reduce (app_name : string) (mapper : string) 
     (reducer : string) (filename : string) =
@@ -69,4 +104,6 @@ let map_reduce (app_name : string) (mapper : string)
   (* The next line is added for debugging purpose*)
   let ()= print_combine_results combined in
   let reduced = reduce combined  "" (app_dir ^ reducer ^ ".ml") in
+  (* The next line is added for debugging purpose*)
+  let ()= print_reduce_results reduced in
   (titles, reduced)

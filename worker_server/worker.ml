@@ -31,7 +31,17 @@ let rec handle_request client =
             if send_response client (Protocol.Mapper(None, error_message))
             then handle_request client else ())
         | InitReducer source -> 
-          failwith "Young master, I cannot aid one who opposes the Master!"
+          let build_result= Program.build source in 
+          (match build_result with 
+          |Some(id), str -> 
+            Mutex.lock reducer_set_lock;
+            reducer_set:= Protocol.Reducer(Some(id), str)::(!reducer_set);
+            Mutex.unlock reducer_set_lock;
+            if send_response client (Protocol.Reducer(Some(id), str))
+            then handle_request client else ()
+          |None, error_message -> 
+            if send_response client (Protocol.Reducer(None, error_message))
+            then handle_request client else ())
         | MapRequest (id, k, v) ->
           print_endline "MapRequest";
           let mapper_found = ref false in 
@@ -53,7 +63,24 @@ let rec handle_request client =
             if send_response client (InvalidWorker(id)) 
             then handle_request client else ()
         | ReduceRequest (id, k, v) -> 
-          failwith "Really? In that case, just tell me what you need."
+          let reducer_found = ref false in 
+          Mutex.lock reducer_set_lock;
+          List.fold_left
+            (fun () worker-> match worker with
+            |Reducer(Some l, str)-> if l=id then reducer_found:=true  else ()
+            |_ -> ()) () !reducer_set;
+          Mutex.unlock reducer_set_lock;
+          if !reducer_found then
+            (match Program.run id (k,v) with
+            |Some v -> 
+              if send_response client (Protocol.ReduceResults(id, v))
+              then handle_request client else ()
+            |None -> 
+              if send_response client (RuntimeError(id, "ReduceRequest error"))
+              then handle_request client else ())
+          else 
+            if send_response client (InvalidWorker(id)) 
+            then handle_request client else ()
       end
   | None ->
       Connection.close client;
