@@ -6,7 +6,6 @@ let map kv_pairs shared_data map_filename : (string * string) list =
   let manager= initialize_mappers map_filename shared_data in
   let the_pool= Thread_pool.create 200 in
   let output = ref [] in
-  let write_lock = Mutex.create() in
   let input = Hashtbl.create 50 in 
   List.fold_left (fun () (k,v)-> Hashtbl.add input k v) () kv_pairs;
   let tbllock= Mutex.create() in 
@@ -20,16 +19,17 @@ let map kv_pairs shared_data map_filename : (string * string) list =
     |None -> ()
     |Some l ->
       output_one:=l;
+      Mutex.lock tbllock;
       let found= Hashtbl.mem input (fst kv_pair) in
-        Mutex.lock tbllock;
-        if not(found) then Mutex.unlock tbllock
-        else 
+      if not(found) then Mutex.unlock tbllock
+      else 
         (Hashtbl.remove input (fst kv_pair);
-         output:= ((!output)@(!output_one));
-         Mutex.unlock tbllock)
+         output:= List.fold_left 
+           (fun lst x-> x::lst) (!output) (!output_one);
+         Mutex.unlock tbllock;)
   in
   print_endline "we start looping";
-  while Hashtbl.length input >0
+  while Hashtbl.length input > 0
  (*   Mutex.lock tbllock;
     let len= Hashtbl.length input in
     Mutex.unlock tbllock;
@@ -47,28 +47,22 @@ let map kv_pairs shared_data map_filename : (string * string) list =
   !output
 
 let combine kv_pairs : (string * string list) list =
-  let arr= ref [||] in 
+  let ()= print_endline "now combine starts!" in
+  let pairs= Hashtbl.create(200) in 
   let combine_one () (k,v) = 
-    let found= ref false in 
-    let index= ref 0 in 
-    while (not(!found)) && (!index < Array.length !arr) do
-      if (fst (!arr.(!index)))= k then 
-        (found:= true; 
-         !arr.(!index)<- (fst !arr.(!index), v::(snd !arr.(!index))))
-      else index:= !index +1
-    done;
-    if (not(!found)) then
-      arr:= Array.append !arr [|(k,[v])|] 
+    let found= Hashtbl.mem pairs k in 
+    if found then Hashtbl.replace pairs k (v::(Hashtbl.find pairs k))
+    else Hashtbl.add pairs k [v]
   in
   List.fold_left combine_one () kv_pairs;
-  Array.to_list !arr
+  Hashtbl.fold (fun k v acc -> (k, v) :: acc) pairs []
 
 let reduce kvs_pairs shared_data reduce_filename 
     : (string * string list) list =
+  let ()= print_endline  "Now reduce starts!" in
   let manager= initialize_reducers reduce_filename shared_data in
   let the_pool = Thread_pool.create 200 in
   let output= ref [] in
-  let write_lock = Mutex.create() in
   let combined = Hashtbl.create 50 in 
   List.fold_left (fun () (k,v)-> Hashtbl.add combined k v) () kvs_pairs;
   let tbllock= Mutex.create() in
@@ -83,15 +77,11 @@ let reduce kvs_pairs shared_data reduce_filename
       output_one:= l;
       Mutex.lock tbllock;
       let found= Hashtbl.mem combined (fst pair) in
-      Mutex.unlock tbllock;
-      if not(found) then ()
+      if not(found) then Mutex.unlock tbllock
       else 
-        (Mutex.lock tbllock;
-         Hashtbl.remove combined (fst pair);
-         Mutex.unlock tbllock;
-         Mutex.lock write_lock;
+        (Hashtbl.remove combined (fst pair);
          output:= (fst pair, !output_one)::(!output);
-         Mutex.unlock write_lock)
+         Mutex.unlock tbllock)
   in 
   while Hashtbl.length combined >0 do
     Hashtbl.iter 
