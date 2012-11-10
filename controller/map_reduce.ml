@@ -20,17 +20,13 @@ let map kv_pairs shared_data map_filename : (string * string) list =
     |None -> ()
     |Some l ->
       output_one:=l;
-      Mutex.lock tbllock;
       let found= Hashtbl.mem input (fst kv_pair) in
-      Mutex.unlock tbllock;
-      if not(found) then ()
-      else 
-        (Mutex.lock tbllock;
-         Hashtbl.remove input (fst kv_pair);
-         Mutex.unlock tbllock;
-         Mutex.lock write_lock;
+        Mutex.lock tbllock;
+        if not(found) then Mutex.unlock tbllock
+        else 
+        (Hashtbl.remove input (fst kv_pair);
          output:= ((!output)@(!output_one));
-         Mutex.unlock write_lock)
+         Mutex.unlock tbllock)
   in
   print_endline "we start looping";
   while Hashtbl.length input >0
